@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Minitel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+<style>
+:root{
+  --case:#5a4532; --case2:#3f2f22; --case-hi:#76604a;
+  --key:#2b2622; --key-txt:#e9e2d6; --key-acc:#c9b79c;
+  --bg:#1b1714;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:#ddd;font-family:'VT323',ui-monospace,monospace}
+body{min-height:100vh;display:flex;justify-content:center;align-items:flex-start;padding:16px}
+/* L'écran (ratio 40×25 cases de 1×1,25) fait 0,78 × sa largeur ; --chrome = hauteur du reste
+   (bordures, clavier, touches). On borne la largeur pour que tout tienne sans défilement. */
+.minitel{--chrome:370px;width:min(100%,680px,max(320px,calc((100vh - var(--chrome)) / .78125 + 72px)));
+  width:min(100%,680px,max(320px,calc((100dvh - var(--chrome)) / .78125 + 72px)));background:linear-gradient(180deg,var(--case-hi),var(--case) 12%,var(--case2));
+  border-radius:22px 22px 14px 14px;padding:18px 18px 14px;box-shadow:0 18px 40px rgba(0,0,0,.6),inset 0 2px 0 rgba(255,255,255,.12)}
+.bezel{background:#120f0d;border-radius:18px;padding:clamp(8px,2.5vw,18px);box-shadow:inset 0 0 0 3px #2a221c,inset 0 6px 18px rgba(0,0,0,.9)}
+.screen{position:relative;container-type:inline-size;background:#050505;border-radius:14px/18px;overflow:hidden;
+  display:grid;grid-template-columns:repeat(40,minmax(0,1fr));grid-template-rows:repeat(25,minmax(0,1fr));aspect-ratio:32/25;cursor:text}
+.screen::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:repeating-linear-gradient(0deg,rgba(0,0,0,.16) 0 1px,transparent 1px 3px),
+  radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.55) 100%)}
+.screen{--sx:1.5} /* élargissement horizontal des lettres (VT323 : chasse 0,4 em) */
+.c{font-size:calc(100cqw / 40 * 1.38);line-height:1;display:flex;align-items:center;justify-content:center;
+  overflow:visible;white-space:pre;text-shadow:0 0 calc(100cqw / 400) currentColor}
+.c span{display:inline-block;transform:scaleX(var(--sx))}
+.brand{display:flex;justify-content:space-between;align-items:center;color:var(--key-acc);font-size:1.15rem;letter-spacing:.25em;margin:10px 4px 8px}
+.brand button{background:none;border:1px solid var(--key-acc);color:var(--key-acc);font:inherit;font-size:.95rem;letter-spacing:.05em;border-radius:4px;padding:0 8px;cursor:pointer}
+.kbd input{width:100%;background:#0e0c0a;border:1px solid #6d5a45;color:#f0e8da;font:inherit;font-size:1.4rem;padding:6px 10px;border-radius:6px;text-transform:uppercase;outline:none}
+.kbd input:focus{border-color:var(--key-acc)}
+.fkeys{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin-top:9px}
+.fkeys button{background:var(--key);color:var(--key-txt);border:0;border-bottom:3px solid #000;border-radius:5px;
+  font:inherit;font-size:clamp(.68rem,2.9vw,1.15rem);padding:9px 0;cursor:pointer;letter-spacing:0;min-width:0;overflow:hidden;white-space:nowrap}
+.fkeys button:active{transform:translateY(2px);border-bottom-width:1px}
+.fkeys button.envoi{background:#7a1f1a}
+.fkeys button.cnx{background:#3c4a2a}
+.note{color:#8a7a68;font-size:1rem;text-align:center;margin-top:10px}
+</style>
+</head>
+<body>
+<div class="minitel">
+  <div class="bezel"><div class="screen" id="screen" aria-live="polite"></div></div>
+  <div class="brand"><span>MINITEL</span><button id="mute" aria-label="Son">♪ SON</button></div>
+  <div class="kbd"><input id="kb" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="24" placeholder="Clavier — tapez ici" aria-label="Clavier"></div>
+  <div class="fkeys">
+    <button data-k="sommaire">SOMMAIRE</button><button data-k="annulation">ANNULATION</button><button data-k="retour">RETOUR</button><button data-k="repetition">RÉPÉTITION</button>
+    <button data-k="guide">GUIDE</button><button data-k="correction">CORRECTION</button><button data-k="suite">SUITE</button><button data-k="envoi" class="envoi">ENVOI</button>
+  </div>
+  <div class="fkeys" style="grid-template-columns:1fr"><button data-k="cnx" class="cnx">CONNEXION / FIN</button></div>
+  <div class="note">Touchez l'écran pour accélérer l'affichage</div>
+</div>
+
+<script src="services.js?v=9ff8d59d70"></script>
+<script>
+'use strict';
+// ---------- Écran 40 x 25 ----------
+const W = 40, H = 25;
+const GREYS = ['#000000', '#2c2c2c', '#474747', '#636363', '#808080', '#a9a9a9', '#d4d4d4', '#f4f4f4'];
+const DEFAULT_FG = 5, ALT = 0.55; // ^ = lettre "plus pâle"
+const scr = document.getElementById('screen');
+const cells = [];
+for (let i = 0; i < W * H; i++) { const d = document.createElement('div'); d.className = 'c'; d.appendChild(document.createElement('span')); scr.appendChild(d); cells.push(d); }
+
+const shade = (hexc, f) => '#' + [1, 3, 5].map(i => Math.round(parseInt(hexc.substr(i, 2), 16) * f).toString(16).padStart(2, '0')).join('');
+function put(r, c, ch, fg = GREYS[DEFAULT_FG], inv = false) {
+  const d = cells[r * W + c]; if (!d) return;
+  d.firstChild.textContent = ch; d.style.color = inv ? '#000' : fg; d.style.background = inv ? fg : 'transparent';
+}
+function clearRows(from = 1, to = 23) { for (let r = from; r <= to; r++) for (let c = 0; c < W; c++) put(r, c, ' '); }
+
+// Analyse une ligne balisée -> liste de cellules {ch, fg, inv}
+function parseLine(line) {
+  const out = []; let g = DEFAULT_FG, inv = false, alt = false;
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === '{') {
+      const m = line.slice(i).match(/^\{(g[0-7]|i|\/)\}/);
+      if (m) { const t = m[1]; if (t === 'i') inv = !inv; else if (t === '/') { g = DEFAULT_FG; inv = false; } else g = +t[1]; i += m[0].length - 1; continue; }
+    }
+    if (line[i] === '^') { alt = true; continue; }
+    out.push({ ch: line[i], fg: alt ? shade(GREYS[g], ALT) : GREYS[g], inv }); alt = false;
+  }
+  return out.slice(0, W);
+}
+
+// ---------- Affichage lent façon 1200 bauds ----------
+let queue = [], typing = null;
+const CPS = 260;
+function drawPage(lines) {
+  stopTyping(); clearRows();
+  lines.forEach((l, r) => parseLine(l).forEach((cell, c) => { if (cell.ch !== ' ' || cell.inv) queue.push([r + 1, c, cell]); }));
+  let last = performance.now();
+  const step = now => {
+    let n = Math.max(1, Math.floor((now - last) * CPS / 1000));
+    if (n) last = now;
+    while (n-- && queue.length) { const [r, c, x] = queue.shift(); put(r, c, x.ch, x.fg, x.inv); }
+    typing = queue.length ? requestAnimationFrame(step) : null;
+  };
+  typing = requestAnimationFrame(step);
+}
+function stopTyping() { if (typing) cancelAnimationFrame(typing); typing = null; queue = []; }
+function flush() { if (typing) cancelAnimationFrame(typing); typing = null; queue.forEach(([r, c, x]) => put(r, c, x.ch, x.fg, x.inv)); queue = []; }
+
+// ---------- Ligne 0 (statut) et ligne 24 (saisie) ----------
+let status = '', statusMsg = '', msgTimer = null, t0 = 0;
+function drawStatus() {
+  let txt = statusMsg || status;
+  if (!statusMsg && state.mode === 'service') {
+    const s = Math.floor((Date.now() - t0) / 1000);
+    const cost = (s / 60 * 0.98).toFixed(2).replace('.', ',') + ' F';
+    const time = String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+    txt = (' ' + status).padEnd(W - cost.length - time.length - 4) + time + '   ' + cost + ' ';
+  }
+  txt = txt.padEnd(W).slice(0, W);
+  for (let c = 0; c < W; c++) put(0, c, txt[c], GREYS[statusMsg ? 7 : 4], !!statusMsg);
+}
+function flash(m) { statusMsg = ' ' + m; drawStatus(); clearTimeout(msgTimer); msgTimer = setTimeout(() => { statusMsg = ''; drawStatus(); }, 2600); }
+setInterval(drawStatus, 1000);
+
+let cursorOn = true;
+function drawInput() {
+  const p = prompt(); const v = kb.value.toUpperCase();
+  for (let c = 0; c < W; c++) put(24, c, ' ');
+  [...p].forEach((ch, c) => put(24, c, ch, GREYS[4]));
+  [...v].forEach((ch, c) => put(24, p.length + c, ch, GREYS[7]));
+  const cc = p.length + v.length; if (cc < W && state.mode !== 'connecting') put(24, cc, cursorOn ? '█' : ' ', GREYS[6]);
+}
+setInterval(() => { cursorOn = !cursorOn; drawInput(); }, 530);
+function prompt() {
+  if (state.mode === 'teletel') return ' Code du service : ';
+  if (state.mode === 'service') { const p = curPage(); return p && p.choices ? ' Votre choix : ' : ' SOMMAIRE ou RETOUR '; }
+  return '';
+}
+
+// ---------- Sons (modem V.23) ----------
+let ac = null, muted = false;
+try { muted = localStorage.getItem('minitel-mute') === '1'; } catch (e) {}
+const muteBtn = document.getElementById('mute');
+const showMute = () => muteBtn.textContent = muted ? '♪ MUET' : '♪ SON';
+showMute();
+muteBtn.onclick = () => { muted = !muted; showMute(); if (muted) stopAudio(); try { localStorage.setItem('minitel-mute', muted ? '1' : '0'); } catch (e) {} };
+function modem(ms) {
+  if (muted) return;
+  try {
+    ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+    const o = ac.createOscillator(), g = ac.createGain(); o.type = 'sine'; g.gain.value = 0.05;
+    o.connect(g).connect(ac.destination);
+    const t = ac.currentTime; o.frequency.setValueAtTime(2100, t);
+    for (let x = 0.7; x < ms / 1000; x += 0.012) o.frequency.setValueAtTime(Math.random() < .5 ? 1300 : 2100, t + x);
+    g.gain.setValueAtTime(0.05, t + ms / 1000 - 0.05); g.gain.linearRampToValueAtTime(0, t + ms / 1000);
+    o.start(t); o.stop(t + ms / 1000);
+  } catch (e) {}
+}
+function bip() {
+  if (muted) return;
+  try { ac = ac || new (window.AudioContext || window.webkitAudioContext)(); const o = ac.createOscillator(), g = ac.createGain();
+    o.frequency.value = 880; g.gain.value = 0.04; o.connect(g).connect(ac.destination); o.start(); o.stop(ac.currentTime + 0.08); } catch (e) {}
+}
+
+// Son d'une page : page.audio = { seq: [[[f1, f2...], ms], ...], gain?, delay? }
+// Chaque segment joue ses fréquences ensemble pendant ms ; [] = silence.
+let audioNodes = [];
+function stopAudio() { audioNodes.forEach(o => { try { o.stop(); } catch (e) {} }); audioNodes = []; }
+function playAudio(a) {
+  stopAudio();
+  if (muted) { flash('Son coupé : touchez ♪ SON pour écouter'); return; }
+  try {
+    ac = ac || new (window.AudioContext || window.webkitAudioContext)(); if (ac.state === 'suspended') ac.resume();
+    const vol = a.gain ?? 0.08, ramp = 0.005;
+    let t = ac.currentTime + (a.delay ?? 800) / 1000;
+    for (const [freqs, ms] of a.seq) {
+      const d = ms / 1000;
+      if (freqs.length) {
+        const g = ac.createGain(); g.connect(ac.destination);
+        g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + ramp);
+        g.gain.setValueAtTime(vol, t + d - ramp); g.gain.linearRampToValueAtTime(0, t + d);
+        for (const f of freqs) { const o = ac.createOscillator(); o.frequency.value = f; o.connect(g); o.start(t); o.stop(t + d); audioNodes.push(o); }
+      }
+      t += d;
+    }
+  } catch (e) {}
+}
+
+// ---------- Crypto : un service = un code ----------
+const enc = new TextEncoder();
+const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const toHex = b => [...b].map(x => x.toString(16).padStart(2, '0')).join('');
+const norm = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^3615/, '');
+async function openService(code) {
+  const T = window.TELETEL; if (!T) return null;
+  const base = await crypto.subtle.importKey('raw', enc.encode(code), 'PBKDF2', false, ['deriveBits']);
+  const bits = new Uint8Array(await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: unb64(T.salt), iterations: T.iter, hash: 'SHA-256' }, base, 384));
+  const e = T.services[toHex(bits.slice(0, 16))]; if (!e) return null;
+  const key = await crypto.subtle.importKey('raw', bits.slice(16), 'AES-GCM', false, ['decrypt']);
+  try { return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(e.iv) }, key, unb64(e.data)))); }
+  catch (err) { return null; }
+}
+
+// ---------- Navigation ----------
+const state = { mode: 'teletel', svc: null, code: '', page: null, hist: [] };
+const inv = t => '{i}' + t.padEnd(W) + '{i}';
+const curPage = () => state.svc && state.svc.pages[state.page];
+const TELETEL_SCREEN = [
+  '', '',
+  '{g6}    ███ ████ █    ████ ███ ████ █',
+  '{g6}     █  █    █    █     █  █    █',
+  '{g6}     █  ███  █    ███   █  ███  █',
+  '{g6}     █  █    █    █     █  █    █',
+  '{g6}     █  ████ ████ ████  █  ████ ████',
+  '', '',
+  '{g4}            ───── 3615 ─────',
+  '', '',
+  '  Tapez le nom du service souhaité,',
+  '  puis appuyez sur ENVOI.',
+  '', '',
+  '{g4}  Le code du premier service figure',
+  '{g4}  dans la description de la cache.',
+];
+
+function teletel() {
+  stopAudio(); state.mode = 'teletel'; state.svc = null; state.page = null; state.hist = [];
+  status = ' TÉLÉTEL'; statusMsg = ''; drawStatus(); kb.value = ''; drawPage(TELETEL_SCREEN); drawInput();
+}
+function show(id, push = true) {
+  if (!state.svc.pages[id]) return;
+  if (push && state.page && state.page !== id) state.hist.push(state.page);
+  state.page = id; kb.value = ''; drawPage(state.svc.pages[id].lines); drawInput();
+  stopAudio(); if (state.svc.pages[id].audio) playAudio(state.svc.pages[id].audio);
+}
+async function connect(raw) {
+  const code = norm(raw);
+  if (!code) { flash('Tapez un code de service'); return; }
+  state.mode = 'connecting'; kb.value = '';
+  status = ' Connexion 3615 ' + code + '...'; drawStatus();
+  drawPage(['', '', '', '', '', '', '', '', '', '', '{g6}         Connexion en cours...', '', '{g4}              3615 ' + code]);
+  drawInput();
+  modem(2200);
+  const [svc] = await Promise.all([openService(code), new Promise(r => setTimeout(r, 2200))]);
+  if (!svc) {
+    state.mode = 'teletel'; status = ' TÉLÉTEL'; drawStatus();
+    drawPage(['', '', '', '', '', '', '', '', '', inv(''), inv('     CE SERVICE N\'EXISTE PAS'), inv(''), '', '', '{g4}   Vérifiez le code puis recommencez.', '', '{g4}   3615 ' + code]);
+    drawInput(); return;
+  }
+  state.mode = 'service'; state.svc = svc; state.code = code; state.hist = []; state.page = null;
+  status = '3615 ' + code; t0 = Date.now(); drawStatus(); show(svc.home, false);
+}
+function envoi() {
+  const v = kb.value.trim();
+  if (state.mode === 'teletel') return connect(v);
+  if (state.mode !== 'service') return;
+  const p = curPage();
+  if (p.choices && p.choices[norm(v)]) return show(p.choices[norm(v)]);
+  bip(); flash(p.choices ? 'Choix incorrect' : 'Utilisez SOMMAIRE ou RETOUR'); kb.value = ''; drawInput();
+}
+function key(k) {
+  if (k !== 'envoi' && k !== 'correction' && k !== 'annulation') flush();
+  if (state.mode === 'connecting') return;
+  const p = curPage();
+  switch (k) {
+    case 'envoi': return envoi();
+    case 'correction': kb.value = kb.value.slice(0, -1); return drawInput();
+    case 'annulation': kb.value = ''; return drawInput();
+    case 'cnx': if (state.mode === 'service') { bip(); return teletel(); } return connect(kb.value);
+    case 'repetition': if (p) return show(state.page, false); return teletel();
+  }
+  if (state.mode !== 'service') { bip(); return; }
+  if (k === 'sommaire') return state.page === state.svc.home ? bip() : (state.hist = [], show(state.svc.home, false));
+  if (k === 'suite') return p.suite ? show(p.suite) : (bip(), flash('Pas de page suivante'));
+  if (k === 'guide') return p.guide ? show(p.guide) : (bip(), flash('Pas d\'aide sur cette page'));
+  if (k === 'retour') {
+    if (p.retour) return show(p.retour, false);
+    if (state.hist.length) return show(state.hist.pop(), false);
+    bip(); flash('Pas de page précédente');
+  }
+}
+
+// ---------- Clavier ----------
+const kb = document.getElementById('kb');
+kb.addEventListener('input', () => { kb.value = kb.value.toUpperCase(); drawInput(); });
+kb.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); key('envoi'); }
+  else if (e.key === 'Escape') { e.preventDefault(); key('annulation'); }
+  else if (e.key === 'PageDown') { e.preventDefault(); key('suite'); }
+  else if (e.key === 'PageUp') { e.preventDefault(); key('retour'); }
+});
+document.querySelectorAll('[data-k]').forEach(b => b.addEventListener('click', () => { key(b.dataset.k); if (matchMedia('(pointer:fine)').matches) kb.focus(); }));
+scr.addEventListener('click', () => { flush(); kb.focus(); });
+
+teletel();
+</script>
+</body>
+</html>
